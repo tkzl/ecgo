@@ -1,0 +1,30 @@
+package controller
+
+import (
+	"fmt"
+	"github.com/tim1020/ecgo"
+)
+
+type Hello struct {
+	*ecgoAPI.Context
+}
+
+func (this *Hello) Hello() {
+	this.Log.Debug("hello,start=%d", this.Stime)
+	content := fmt.Sprintf("Hello,id=%s,start=%d", this.Get("id"), this.Stime)
+	this.Out(content)
+}
+
+func (this *Hello) Say() {
+	data:= this.Gets("nickname","name","age")
+	data["mygirl"] = this.GetData("mygirl").(string)
+	this.JsonOk(data)
+}
+
+func (this *Hello) Begin(){
+	
+}
+
+func (this *Hello) End() {
+	this.JsonOk("default")
+}

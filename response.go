@@ -1,49 +1,77 @@
-//对responseWriter行二次封装，提供更方便的操作header,cookie和输出响应、渲染模板等方法
-
 package ecgo
 
+//定义Context对象响应输出的相关方法
+
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
-	. "github.com/tim1020/ecgo/util"
 	"net/http"
 	"strconv"
 	"time"
 )
 
-func (this *resWriter) Write(b []byte) (n int, err error) {
-	n, err = this.ResponseWriter.Write(b)
-	this.Length += n
-	return
-}
-func (this *resWriter) WriteHeader(code int) {
-	this.ResponseWriter.WriteHeader(code)
-	this.Code = code
+// 输出响应内容
+func (this *Response) Out(content string) {
+	fmt.Fprintf(this.ResponseWriter, content)
 }
 
-//在响应中添加Header,在body输出前调用
-func (this *Request) SetHeader(key, val string) {
-	this.ResWriter.Header().Set(key, val)
+//json格式的正常响应，{code: ,error:null, data: content}
+func (this *Response) JsonOk(content interface{}) {
+	this.SetHeader("Content-Type", "application/json;charset=utf-8")
+	jData := make(map[string]interface{})
+	jData["code"], _ = strconv.Atoi(Config.Get("err_code.ok", "0"))
+	jData["error"] = nil
+	jData["data"] = content
+
+	jsonStr, err := json.Marshal(jData)
+	if err != nil {
+
+	} else {
+		this.Out(string(jsonStr))
+	}
 }
 
-//在响应中添加cookie，在body输出前调用
-//
-//支持三种方式:
-//
-//1. SetCookie(name,val string) 2.SetCookie(name string,val string,expire int) 3.SetCookie(c *http.Cookie)
-func (this *Request) SetCookie(c ...interface{}) (err error) {
+//json格式的错误响应 {code: errcode, error: errMsg, data: interface}
+func (this *Response) JsonErr(code int, err string) {
+	this.SetHeader("Content-Type", "application/json;charset=utf-8")
+	jData := make(map[string]interface{})
+	jData["code"] = code
+	jData["error"] = err
+	jData["data"] = nil
+
+	jsonStr, _ := json.Marshal(jData)
+	this.Out(string(jsonStr))
+}
+
+// 访问控制器不存在时，输出404
+func (this *Response) NotFound() {
+	this.WriteHeader(404)
+	this.Out("<h2>404 Not Found!</h2>")
+}
+
+// 设置响应header
+func (this *Response) SetHeader(k, v string) {
+	this.Header().Set(k, v)
+}
+
+//设置cookie
+//支持三种方式 :
+// 1. SetCookie(name,val string)
+// 2.SetCookie(name string,val string,expire int)
+// 3.SetCookie(c *http.Cookie)
+func (this *Response) SetCookie(c ...interface{}) {
 	len := len(c)
 	switch {
 	case len == 1: //http.Cookie
 		if cookie, ok := c[0].(*http.Cookie); ok {
-			http.SetCookie(this.ResWriter, cookie)
+			http.SetCookie(this.ResponseWriter, cookie)
 			return
 		}
 	case len == 2: //name,val
 		name, ok1 := c[0].(string)
 		val, ok2 := c[1].(string)
 		if ok1 && ok2 {
-			http.SetCookie(this.ResWriter, &http.Cookie{Name: name, Value: val})
+			http.SetCookie(this.ResponseWriter, &http.Cookie{Name: name, Value: val})
 			return
 		}
 	case len == 3: //name,val,expire
@@ -52,59 +80,8 @@ func (this *Request) SetCookie(c ...interface{}) (err error) {
 		t, ok3 := c[2].(int)
 		if ok1 && ok2 && ok3 {
 			expires := time.Now().Add(time.Second * time.Duration(t))
-			http.SetCookie(this.ResWriter, &http.Cookie{Name: name, Value: val, Expires: expires})
+			http.SetCookie(this.ResponseWriter, &http.Cookie{Name: name, Value: val, Expires: expires})
 			return
 		}
 	}
-	//if here,something wrong
-	err = errors.New("params wrong")
-	this.Log.W("SetCookie FAIL: params=%v", c)
-	return
-}
-
-//重定向至url
-func (this Request) Redirect(url string) {
-	http.Redirect(this.ResWriter, this.Req, url, http.StatusFound)
-}
-
-//响应一个错误,可在view目录放置以statusCode为名称的模板,没有模板时，使用内置格式显示
-func (this *Request) ShowErr(statusCode int, msg string) {
-	this.ResWriter.WriteHeader(statusCode)
-	code := strconv.Itoa(statusCode)
-	if t, exists := this.viewTemplates[code]; exists {
-		data := map[string]string{"statusCode": code, "message": msg}
-		t.Execute(this.ResWriter, data)
-	} else {
-		html := `<!DOCTYPE html>
-			<html lang="zh-CN">
-			<head><title>%s</title></head>
-			<body>
-			<h2>%d %s</h2><li>%s
-			</body>
-			</html>
-		`
-		sText := http.StatusText(statusCode)
-		fmt.Fprintf(this.ResWriter, html, sText, statusCode, sText, msg)
-	}
-}
-
-//渲染模板并输出(模板存放在RootPath下的views目录)
-func (this *Request) Render(tplName string, data interface{}) {
-	this.Log.Write(LL_SYS, "[%s]render start,tplName=%s,data=%v", this.appId, tplName, data)
-	this.Bm.Set("render_start")
-	defer func() {
-		this.Bm.Set("render_end")
-		this.Log.Write(LL_SYS, "[%s]render finish", this.appId)
-	}()
-	if t, exists := this.viewTemplates[tplName]; exists {
-		t.Execute(this.ResWriter, data)
-	} else {
-		fmt.Fprintf(this.ResWriter, "tpl not found")
-	}
-}
-
-//使用格式化字串输出响应
-func (this *Request) Resp(format string, data ...interface{}) {
-	fmt.Fprintf(this.ResWriter, format, data...)
-	return
 }

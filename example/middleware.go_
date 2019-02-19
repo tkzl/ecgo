@@ -1,0 +1,41 @@
+package middleware
+
+import (
+	"net/http"
+	"time"
+	"strconv"
+	. "github.com/tim1020/ecgoAPI"
+)
+
+type BenchMark struct{
+	*Context
+}
+type MyRouter struct{
+	*Context
+}
+
+func (this *BenchMark) Handler(next http.Handler) http.Handler {
+	this.Log.Debug("m1 ready")
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ts := time.Now().UnixNano()
+		this.Log.Debug("%s %s",this.Req.Method, this.Req.Path)
+		next.ServeHTTP(w, r)
+		total := time.Now().UnixNano() - ts
+		elapse, _ := strconv.ParseFloat(strconv.FormatInt(total, 10), 64)
+		this.Log.Debug("elapse time=%.3f ms\n", elapse / 1000000)
+    })
+}
+
+
+func (this *MyRouter) Handler(next http.Handler) http.Handler {
+	this.Log.Debug("myrouter reday")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := this.Get("c").(string)
+		act := this.Get("act", "Index").(string)
+		if c == "xxxx" {
+			next.ServeHTTP(w,r)
+		} else {
+			this.Execute(c, act)
+		}
+	})
+}

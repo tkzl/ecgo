@@ -1,0 +1,31 @@
+package main
+
+import (
+	"fmt"
+	. "myapp/controller"
+	. "myapp/middleware"
+
+	//. "myapp/service"
+	_ "net/http/pprof"
+
+	"github.com/tim1020/ecgo"
+	"github.com/tim1020/ecgo/util"
+)
+
+type MyLogWriter struct {
+}
+
+func (m *MyLogWriter) Write(kind string, msg []util.LogMsg) {
+	for _, v := range msg {
+		fmt.Printf("t=%d`msg=%s\n", v.Time, v.Content)
+	}
+}
+
+func main() {
+	e := ecgo.New(&Hello{})
+	e.SetLogWriter("event", &MyLogWriter{})
+	e.Use(&BenchMark{}) //中间件,实现接口 func Handler(next http.Handler) http.Handler
+	e.AddService(&User{})
+	//e.Use(&MyRouter{})
+	e.Run()
+}

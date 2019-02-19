@@ -1,8 +1,8 @@
-//提供常用的工具函数
-
-// 常用工具包
+//ecgoAPI的工具包
+//包括：
+//  ini配置读取
+//  日志处理
 //
-// 提供 benchmark,log处理，ini配置文件处理,数据校验validator，Md5等方法
 package util
 
 import (

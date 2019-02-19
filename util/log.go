@@ -1,5 +1,4 @@
 //日志相关操作
-
 package util
 
 import (
@@ -7,75 +6,156 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
+	"path/filepath"
 )
 
-const (
-	LL_DEBUG  = "debug"
-	LL_WARN   = "warn"
-	LL_ERROR  = "error"
-	LL_SYS    = "sys"
-	LL_ACCESS = "access"
-	LL_ALL    = "all"
-)
+var kinds  = []string {"trace","debug","warn","event","error"}
 
-type Log struct {
-	lType string //日志类别
-	path  string //日志目录，当target为file时有效
+type LogMsg struct {
+	Time int64
+	Content string
+}
+type LogWriter interface {
+	Write(kind string, msg []LogMsg)
 }
 
-//生成Log对象
-func NewLogger(lType, path string) *Log {
-	//判断日志目录是否存在，不存在时先创建
-	_, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		os.MkdirAll(path, os.ModePerm)
+type Logger struct {
+	writer map[string]LogWriter
+	buffc  map[string]chan string
+	buffsize int
+}
+
+//生成Logger对象
+func NewLogger(writer map[string]LogWriter, size ...int) *Logger {
+	defaultWriter := &ConsoleWriter{}
+	if writer == nil {
+		writer = make(map[string]LogWriter)
 	}
-	return &Log{lType: lType, path: path}
+	for _, k := range kinds {
+		if _, ok := writer[k]; !ok {  
+			writer[k] = defaultWriter
+		}
+	}
+	buffc := make(map[string]chan string)
+	buffsize := 100
+	if len(size) > 0 {
+		buffsize = size[0]
+	}
+	return &Logger{writer, buffc, buffsize}
+}
+//设置日志类型对应的writer
+func (this *Logger) SetWriter(kind string, w LogWriter) {
+	this.writer[kind] = w
+}
+//设置buffsize
+func (this *Logger) SetBufferSize(size int) {
+	this.buffsize = size
+}
+
+//记录trace日志
+func (this *Logger) Trace(format string, vals ...interface{}) {
+	this.write("trace", format, vals...)
 }
 
 //记录debug日志
-func (this *Log) D(format string, vals ...interface{}) {
-	this.Write(LL_DEBUG, format, vals...)
-}
-
-//记录error日志
-func (this *Log) E(format string, vals ...interface{}) {
-	this.Write(LL_ERROR, format, vals...)
+func (this *Logger) Debug(format string, vals ...interface{}) {
+	this.write("debug", format, vals...)
 }
 
 //记录warnning日志
-func (this *Log) W(format string, vals ...interface{}) {
-	this.Write(LL_WARN, format, vals...)
+func (this *Logger) Warn(format string, vals ...interface{}) {
+	this.write("warn", format, vals...)
 }
 
-//记录指定日志,ll为日志名称
-func (this *Log) Write(lType string, format string, vals ...interface{}) {
-	if !this.isNeed(lType) {
+//记录event日志
+func (this *Logger) Event(format string, vals ...interface{}) {
+	this.write("event", format, vals...)
+}
+
+//记录error日志
+func (this *Logger) Error(format string, vals ...interface{}) {
+	this.write("error", format, vals...)
+}
+
+//记录指定日志
+func (this *Logger) write(kind string, format string, vals ...interface{}) {
+	if this.writer[kind] == nil {
 		return
 	}
-	t := time.Now()
-	filepath := fmt.Sprintf("%s/%s_%s.log", this.path, lType, string(t.Format("20060102")))
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
-	if err != nil {
-		return
+	if _,ok := this.buffc[kind];!ok {
+		this.buffc[kind] = make(chan string, this.buffsize)
+		go func (this *Logger, kind string) {
+			msgs := []LogMsg{}
+			for {
+				select {
+					case msg := <- this.buffc[kind]:
+						msgs = append(msgs, LogMsg{Time:time.Now().Unix(), Content:msg})
+					case <- time.After(time.Millisecond * 500):
+				}
+				if len(msgs) > 0 {
+					this.writer[kind].Write(kind, msgs)
+					msgs = msgs[0:0]
+				}
+			}
+		} (this, kind)
 	}
-	defer file.Close()
-	wFile := bufio.NewWriter(file)
-	wFile.WriteString(string(t.Format("2006/01/02 15:04:05 ")))
-	wFile.WriteString(fmt.Sprintf(format, vals...))
-	wFile.WriteString("\n")
-	err = wFile.Flush()
-	if err != nil {
-		log.Fatalln("[err]:", err)
+	this.buffc[kind] <- fmt.Sprintf(format + "\n", vals...)
+}
+
+// >######## 内置LogWriter
+
+//输出到console
+type ConsoleWriter struct{
+}
+
+func (*ConsoleWriter) Write (kind string, msg []LogMsg){
+	for _,v := range msg{
+		fmt.Printf("%s[%5s]: %s", time.Unix(v.Time, 0).Format("2006/01/02 15:04:05 "), kind, v.Content)
 	}
 }
 
-//判断是否需要记录指定级别日志
-func (this *Log) isNeed(lType string) bool {
-	if lType != "LL_ACCESS" && !strings.Contains(this.lType, lType) && !strings.Contains(this.lType, LL_ALL) { //access在调用前控制
-		return false
+//输出到文件
+type FileWriter struct{
+	Path string
+	init bool
+}
+
+func (this *FileWriter) Write (kind string, msg []LogMsg){
+	//初次调用，判断path
+	if !this.init { 
+		path := filepath.Dir(this.Path)
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				os.MkdirAll(path, os.ModePerm)
+			} else {
+				log.Printf("[error]: %v", err)
+				return
+			}
+		}
+		this.init = true
 	}
-	return true
+	dst := this.Path + "/" + kind
+	//判断是否需要rotate
+	stat, err := os.Stat(dst)
+	if err == nil { 
+		//TODO: Size判断
+		modify := stat.ModTime().Format("20060102") //最后修改日期
+		today := time.Now().Format("20060102")
+		if today != modify {
+			os.Rename(dst, dst+"_"+ modify)
+		}
+	}
+	//写入
+	fd, err := os.OpenFile(dst, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		log.Printf("[error]: %v", err)
+		return
+	}
+	defer fd.Close()
+	wFile := bufio.NewWriter(fd)
+	for _,v := range msg {
+		wFile.WriteString(fmt.Sprintf("%s %s", time.Unix(v.Time, 0).Format("2006/01/02 15:04:05 "), v.Content))
+	}
+	wFile.Flush()
 }

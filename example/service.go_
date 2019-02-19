@@ -1,0 +1,52 @@
+package service
+
+//注册service
+
+import (
+	"reflect"
+	 "github.com/tim1020/ecgoAPI"
+)
+
+
+var Services map[string]ecgoAPI.ServiceProvider
+
+func init(){
+	Services = make(map[string]ecgoAPI.ServiceProvider)
+	lst := [...]interface{}{ //初始化所有service对象
+		new(User),
+	}
+	for _, v := range lst {
+		t := reflect.TypeOf(v).Elem()
+		Services[t.Name()] = v.(ecgoAPI.ServiceProvider)
+	}
+}
+
+type User struct{
+	*ecgoAPI.Service
+}
+
+type Worker interface{
+	Work()
+}
+
+func (this *User) Get() map[string]string {
+	u := make(map[string]string)
+	u["name"] = "Tim"
+	return u
+}
+func (this *User) LstAll() []string{
+	this.Log.Debug(">>>>>LstAll")
+	r := this.Methods()
+	return r
+}
+func (this *User) Work() {
+	this.Log.Debug("work")
+}
+
+//使用例子：在controller中
+
+// func (this *Context) Hello() {
+//	this.Service("User").(*User).Get() //断言为对象，可以执行对象所有方法
+//	this.Service("User").(Worker).Work()  //断言为接口类型，则只能调用此接口定义的方法
+// }
+

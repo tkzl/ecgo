@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 )
 
 var (
@@ -18,66 +17,94 @@ var (
 	bSectionStart = []byte{'['}
 	bSectionEnd   = []byte{']'}
 	bEqual        = []byte{'='}
-	confData      = make(map[string]map[string]string) //配置数据
-	cMtime        int64                                //配置的最后修改时间
 )
 
-//加载ini格式配置文件,可多个,多个文件之间有相同的key会覆盖
-//只读取一次文件，除非文件发生改变
-func LoadConf(files ...string) (map[string]string, error) {
-	for _, file := range files { //遍历要读取的配置文件
-		f, err := os.Open(file)
-		if err != nil {
-			return nil, err
+type IniConfig struct {
+	fd io.Reader
+	content map[string]interface{}
+	Mtime int64
+}
+
+func NewIniConfig(file string) *IniConfig {
+	fd, err := os.Open(file)
+	defer fd.Close()
+	if err != nil {
+		return nil
+	}
+	stat, _ := fd.Stat()
+	cfg := &IniConfig{fd, make(map[string]interface{}), stat.ModTime().Unix()}
+	cfg.parse()
+	return cfg
+}
+
+//读取单项配置, key = "k" 或 key="section.k",没有返回缺省值
+func (this *IniConfig) Get(args ...string) string{
+	defaultVal:=""
+	if len(args) > 1 {
+		defaultVal = args[1]
+	}
+	key := args[0]
+	keys := strings.SplitN(key, ".",2)
+	
+	if(len(keys) > 1) {
+		if sItem, ok := this.content[keys[0]]; ok {
+			if val, ok := sItem.(map[string]string)[keys[1]]; ok {
+				return val
+			}
 		}
-		defer f.Close()
-		stat, _ := f.Stat()
-		if stat.ModTime().Unix() <= cMtime { //未修改过的，不需要读
+	} else {
+		if val, ok := this.content[key];ok {
+			return val.(string)
+		}
+	}
+	return defaultVal
+}
+
+//读取一个section
+func (this *IniConfig) GetSection(key string) (map[string]string) {
+	val := make(map[string]string)
+	if items, ok := this.content[key]; ok {
+		for k, v := range items.(map[string]string) {
+			val[k] = v
+		}
+	}
+	return val
+}
+
+//解析
+func (this *IniConfig) parse() (err error) {
+	buf := bufio.NewReader(this.fd)
+	section := ""
+	for ln := 1; ; ln++ {
+		line, err := buf.ReadBytes('\n')
+		if err != nil {
+			if err != io.EOF {
+				return err
+			} else if len(line) == 0 {
+				break
+			}
+		}
+		line = bytes.TrimSpace(line)
+		if line == nil || bytes.HasPrefix(line, bComment) { //空白行或注释
 			continue
 		}
-		//读取文件
-		confData[f.Name()] = make(map[string]string)
-
-		buf := bufio.NewReader(f)
-		section := ""
-		for ln := 1; ; ln++ {
-			line, err := buf.ReadBytes('\n')
-			if err != nil {
-				if err != io.EOF {
-					return nil, err
-				} else if len(line) == 0 {
-					break
-				}
-			}
-			line = bytes.TrimSpace(line)
-			if line == nil || bytes.HasPrefix(line, bComment) {
-				continue
-			}
-			if bytes.HasPrefix(line, bSectionStart) && bytes.HasSuffix(line, bSectionEnd) {
-				section = strings.ToLower(string(line[1 : len(line)-1]))
-				continue
-			}
-
-			keyValue := bytes.SplitN(line, bEqual, 2)
-			if len(keyValue) != 2 {
-				return nil, errors.New(fmt.Sprintf("Load conf file error: file=%s,line=%d", file, ln))
-			}
-			key := string(bytes.TrimSpace(keyValue[0]))
-			if section != "" {
-				key = section + "." + key
-			}
-			val := bytes.TrimSpace(keyValue[1])
-			val = bytes.Trim(val, `"'`) //如果有，去掉引号
-			confData[f.Name()][key] = string(val)
+		if bytes.HasPrefix(line, bSectionStart) && bytes.HasSuffix(line, bSectionEnd) {
+			section = strings.ToLower(string(line[1 : len(line)-1]))
+			this.content[section] = make(map[string]string)
+			continue
+		}
+		keyValue := bytes.SplitN(line, bEqual, 2)
+		if len(keyValue) != 2 {
+			return  errors.New(fmt.Sprintf("配置文件读取错误: line=%d", ln))
+		}
+		key := string(bytes.TrimSpace(keyValue[0]))
+		val := bytes.TrimSpace(keyValue[1])
+		val = bytes.Trim(val, `"'`) //如果有，去掉引号
+		if section == "" {
+			this.content[key] = string(val)
+		} else {
+			this.content[section].(map[string]string)[key] = string(val)
 		}
 	}
-	cMtime = time.Now().Unix()
-	//获取confData的copy，因为调用者有可能会修改
-	data := make(map[string]string)
-	for _, d := range confData {
-		for k, v := range d {
-			data[k] = v
-		}
-	}
-	return data, nil
+	return nil
 }
