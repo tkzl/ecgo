@@ -18,7 +18,6 @@ type (
 	App struct {
 		Utime       int64
 		middlewares []Middleware
-		*Container
 	}
 	//单例容器
 	Container struct {
@@ -30,6 +29,10 @@ type (
 		Config *util.IniConfig
 		Logger *util.Logger
 		*Request
+	}
+	//model
+	Model struct {
+		table string
 	}
 	// 单次会话上下文对象(应用于middleware\controller)
 	Context struct {
@@ -101,7 +104,7 @@ type (
 func New(c ...Controller) *App {
 	container = &Container{}
 	container.addController(c...)
-	e := &App{Utime: time.Now().UnixNano(), Container: container}
+	e := &App{Utime: time.Now().UnixNano()}
 
 	// 绑定中间件入口
 	e.Use(&entryMiddleware{})

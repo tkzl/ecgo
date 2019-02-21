@@ -3,6 +3,7 @@ package ecgo
 import (
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/tim1020/ecgo/util"
@@ -34,11 +35,29 @@ func (this *entryMiddleware) Handler(next http.Handler) http.Handler {
 	})
 }
 
+//缺省路由处理，根据请求Path来分派
 func (this *routerMiddleware) Handler(http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 根据请求的Method,Path来获得要执行控制器及方法
-		c, _ := this.Get("c")
-		act, _ := this.Get("act")
+		if this.Path == "/favicon.ico" {
+			return
+		}
+		path := this.Path
+		routeTable := this.Config.GetSection("router")
+		if p, exists := routeTable[path]; exists {
+			path = p
+		}
+		c := "Index"
+		act := "Default"
+		if path != "/" {
+			p := strings.SplitN(path, "/", 3) //=> /Controller/Action
+			switch len(p) {
+			case 3:
+				c = p[1]
+				act = p[2]
+			case 2:
+				c = p[1]
+			}
+		}
 		this.Execute(c, act)
 	})
 }
