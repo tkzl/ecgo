@@ -1,7 +1,6 @@
 package ecgo
 
 import (
-	"fmt"
 	"reflect"
 )
 
@@ -28,13 +27,12 @@ func (this *Context) Execute(c, act string) {
 	if controller, exists := container.controllers[c]; exists {
 		c := reflect.ValueOf(controller)
 		c.Elem().FieldByName("Context").Set(reflect.ValueOf(this))
-		// 注入service
 
+		// 注入service
 		elem := reflect.ValueOf(controller).Elem()
 		req := reflect.ValueOf(this.Request)
 		for i := 0; i < elem.NumField(); i++ {
 			serviceName := elem.Type().Field(i).Name
-			fmt.Printf("sname=%s\n", serviceName)
 			if service, ok := container.services[serviceName]; ok {
 				s := reflect.ValueOf(service)
 				s.Elem().FieldByName("Request").Set(req)

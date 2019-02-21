@@ -1,7 +1,6 @@
 package ecgo
 
 import (
-	"fmt"
 	"reflect"
 )
 
@@ -19,19 +18,21 @@ func (this *Container) addService(s ...Servicer) {
 	service := reflect.ValueOf(&Service{Logger: Logger, Config: Config})
 	for _, v := range s {
 		reflect.ValueOf(v).Elem().FieldByName("Service").Set(service)
-		//TODO: 注入models,dao等
 		this.services[reflect.TypeOf(v).Elem().Name()] = v
 	}
 
-	//再次扫描容器中所有services，为每个service绑定所依赖的其它service
+	//再次扫描容器中所有services，为每个service绑定其它依赖
 	for _, v := range this.services {
 		elem := reflect.ValueOf(v).Elem()
 		for i := 0; i < elem.NumField(); i++ {
-			serviceName := elem.Type().Field(i).Name
-			if service, ok := container.services[serviceName]; ok {
-				fmt.Printf("serviceName=%s\n", serviceName)
-				s := reflect.ValueOf(service)
-				elem.FieldByName(serviceName).Set(s)
+			name := elem.Type().Field(i).Name
+			//model
+			if objType := elem.Type().Field(i).Type.String(); objType == "*ecgo.Model" {
+				elem.FieldByName(name).Set(reflect.ValueOf(NewModel(name)))
+			}
+			//其它service
+			if service, ok := container.services[name]; ok {
+				elem.FieldByName(name).Set(reflect.ValueOf(service))
 			}
 		}
 	}
