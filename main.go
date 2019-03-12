@@ -23,6 +23,7 @@ type (
 	Container struct {
 		controllers map[string]Controller
 		services    map[string]Servicer
+		models      map[string]*Model
 	}
 	//service
 	Service struct {
@@ -30,10 +31,7 @@ type (
 		Logger *util.Logger
 		*Request
 	}
-	//model
-	Model struct {
-		table string
-	}
+
 	// 单次会话上下文对象(应用于middleware\controller)
 	Context struct {
 		Config *util.IniConfig
@@ -125,7 +123,16 @@ func (this *App) Run() {
 	ctx := reflect.ValueOf(&Context{Config: Config, Logger: Logger})
 	mux := http.Handler(nil)
 	for _, v := range this.middlewares {
-		reflect.ValueOf(v).Elem().FieldByName("Context").Set(ctx)
+		elem := reflect.ValueOf(v).Elem()
+		elem.FieldByName("Context").Set(ctx)
+		//为middleware注入service
+		for i := 0; i < elem.NumField(); i++ {
+			serviceName := elem.Type().Field(i).Name
+			if service, ok := container.services[serviceName]; ok {
+				s := reflect.ValueOf(service)
+				elem.FieldByName(serviceName).Set(s)
+			}
+		}
 		mux = v.Handler(mux)
 	}
 	port := Config.Get("port", ":8081")

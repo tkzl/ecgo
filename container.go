@@ -28,7 +28,8 @@ func (this *Container) addService(s ...Servicer) {
 			name := elem.Type().Field(i).Name
 			//model
 			if objType := elem.Type().Field(i).Type.String(); objType == "*ecgo.Model" {
-				elem.FieldByName(name).Set(reflect.ValueOf(NewModel(name)))
+				//TODO: Table Name与Model Name的对应转换
+				elem.FieldByName(name).Set(reflect.ValueOf(this.getModel(name)))
 			}
 			//其它service
 			if service, ok := container.services[name]; ok {
@@ -36,4 +37,20 @@ func (this *Container) addService(s ...Servicer) {
 			}
 		}
 	}
+}
+
+// 从容器中获取model对象，如果未有先创建
+func (this *Container) getModel(name string) *Model {
+	if nil == this.models {
+		this.models = make(map[string]*Model)
+	}
+	model, exists := this.models[name]
+	if !exists {
+		model = newModel(name)
+		if err := model.LastError(); err != nil {
+			panic(err)
+		}
+		this.models[name] = model
+	}
+	return model
 }
