@@ -13,6 +13,7 @@ import (
 // 输出响应内容
 func (this *Response) Out(content string) {
 	fmt.Fprintf(this.ResponseWriter, content)
+	this.Length = len(content)
 }
 
 //json格式的正常响应，{code: ,error:null, data: content}
@@ -46,6 +47,7 @@ func (this *Response) JsonErr(code int, err string) {
 // 访问控制器不存在时，输出404
 func (this *Response) NotFound() {
 	this.WriteHeader(404)
+	this.Code = 404
 	this.Out("<h2>404 Not Found!</h2>")
 }
 

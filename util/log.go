@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var kinds = []string{"trace", "debug", "warn", "event", "error"}
+var kinds = []string{"info", "debug", "warn", "event", "error", "access"}
 
 type LogMsg struct {
 	Time    int64
@@ -57,9 +57,9 @@ func (this *Logger) SetBufferSize(size int) {
 	this.buffsize = size
 }
 
-//记录trace日志
-func (this *Logger) Trace(format string, vals ...interface{}) {
-	this.write("trace", format, vals...)
+//记录info日志
+func (this *Logger) Info(format string, vals ...interface{}) {
+	this.write("info", format, vals...)
 }
 
 //记录debug日志
@@ -80,6 +80,11 @@ func (this *Logger) Event(format string, vals ...interface{}) {
 //记录error日志
 func (this *Logger) Error(format string, vals ...interface{}) {
 	this.write("error", format, vals...)
+}
+
+//记录access日志
+func (this *Logger) Access(format string, vals ...interface{}) {
+	this.write("access", format, vals...)
 }
 
 //记录指定日志

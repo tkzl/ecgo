@@ -58,7 +58,8 @@ type (
 	// 响应对象
 	Response struct {
 		http.ResponseWriter
-		// Length	int64	//响应大小
+		Length int //响应大小
+		Code   int //响应码
 	}
 	//上传文件信息结构
 	UpFile struct {
