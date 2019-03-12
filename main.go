@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/tim1020/ecgo/util"
@@ -100,6 +101,7 @@ type (
 
 //框架对象
 func New(c ...Controller) *App {
+	Logger.Debug("App start")
 	container = &Container{}
 	container.addController(c...)
 	e := &App{Utime: time.Now().UnixNano()}
@@ -129,6 +131,7 @@ func (this *App) Run() {
 		for i := 0; i < elem.NumField(); i++ {
 			serviceName := elem.Type().Field(i).Name
 			if service, ok := container.services[serviceName]; ok {
+				Logger.Debug("inject %s to %s", serviceName, elem.Type().Name())
 				s := reflect.ValueOf(service)
 				elem.FieldByName(serviceName).Set(s)
 			}
@@ -136,9 +139,28 @@ func (this *App) Run() {
 		mux = v.Handler(mux)
 	}
 	port := Config.Get("port", ":8081")
-	fmt.Printf("listen on %s\n", port)
+	Logger.Debug("listen %s", port)
 	http.Handle("/", mux)
-	http.ListenAndServe(port, nil)
+	if !strings.HasPrefix(port, ":") {
+		port = ":" + port
+	}
+	go http.ListenAndServe(port, nil)
+
+	//ssl
+	if sslOn := Config.Get("ssl.on", "false"); sslOn == "true" {
+		sslPort := Config.Get("ssl.port", ":443")
+		if !strings.HasPrefix(sslPort, ":") {
+			sslPort = ":" + sslPort
+		}
+		ca := Config.Get("ssl.ca", "")
+		caKey := Config.Get("ssl.ca_key", "")
+		Logger.Debug("ssl listen %s", sslPort)
+		if err := http.ListenAndServeTLS(sslPort, ca, caKey, nil); err != nil {
+			panic(fmt.Sprintf("ssl error: %v", err))
+		}
+	}
+
+	select {}
 }
 
 // 加载中间件(栈)

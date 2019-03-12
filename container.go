@@ -29,10 +29,12 @@ func (this *Container) addService(s ...Servicer) {
 			//model
 			if objType := elem.Type().Field(i).Type.String(); objType == "*ecgo.Model" {
 				//TODO: Table Name与Model Name的对应转换
+				Logger.Debug("inject model %s to %s", name, elem.Type().Name())
 				elem.FieldByName(name).Set(reflect.ValueOf(this.getModel(name)))
 			}
 			//其它service
 			if service, ok := container.services[name]; ok {
+				Logger.Debug("inject service %s to %s", name, elem.Type().Name())
 				elem.FieldByName(name).Set(reflect.ValueOf(service))
 			}
 		}

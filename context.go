@@ -23,8 +23,9 @@ func (this *Context) Load(k string) interface{} {
 }
 
 // 执行控制器及方法
-func (this *Context) Execute(c, act string) {
-	if controller, exists := container.controllers[c]; exists {
+func (this *Context) Execute(control, act string) {
+	this.Logger.Debug("excute: control=%s, action=%s", control, act)
+	if controller, exists := container.controllers[control]; exists {
 		c := reflect.ValueOf(controller)
 		c.Elem().FieldByName("Context").Set(reflect.ValueOf(this))
 
@@ -36,6 +37,8 @@ func (this *Context) Execute(c, act string) {
 			if service, ok := container.services[serviceName]; ok {
 				s := reflect.ValueOf(service)
 				s.Elem().FieldByName("Request").Set(req)
+				Logger.Debug("inject service %s to %s", serviceName, control)
+
 				elem.FieldByName(serviceName).Set(s)
 			}
 		}
@@ -56,7 +59,7 @@ func (this *Context) Execute(c, act string) {
 			this.NotFound()
 		}
 	} else {
-		this.Logger.Debug("controller(%s) not found", c)
+		this.Logger.Debug("controller(%s) not found", control)
 		this.NotFound()
 	}
 }
