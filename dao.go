@@ -11,34 +11,30 @@ import (
 
 //mysql操作对象
 type Model struct {
-	DB           *sql.DB
-	Table        string //表名
-	maxOpenConns int
-	maxIdleConns int
-	order        string        //排序，“id desc”
-	field        string        //查询的字段
-	pageIndex    int           //页码(由1开始)
-	pageSize     int           //每页大小
-	pkName       string        //主键名称
-	pkId         int64         //主键值
-	where        string        //条件
-	whereHolder  []interface{} //where的占位值
-	err          error
-	tx           *sql.Tx
-	fields       []string //表的字段列表
+	*Dao
+	Table       string        //表名
+	order       string        //排序，“id desc”
+	field       string        //查询的字段
+	pageIndex   int           //页码(由1开始)
+	pageSize    int           //每页大小
+	pkName      string        //主键名称
+	pkId        int64         //主键值
+	where       string        //条件
+	whereHolder []interface{} //where的占位值
+	fields      []string      //表的字段列表
 }
 
 //TODO: 记录所有执行过的sql语句和执行时间
 
 //创建model对象(基于mysql)
-//
-//
+
 func newModel(table string) (model *Model) {
+	Logger.Debug(">>>>>new Model")
 	dbConf := Config.GetSection("db")
 	db, err := sql.Open("mysql", dbConf["mysql_dsn"])
 	if err == nil {
 		db.Ping()
-		model = &Model{DB: db, Table: table, maxOpenConns: 10, maxIdleConns: 5}
+		model = &Model{Dao: &Dao{DB: db}, Table: table}
 		model.err = model.desc()
 		model.reset()
 	}

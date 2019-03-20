@@ -12,8 +12,8 @@ import (
 
 // 输出响应内容
 func (this *Response) Out(content string) {
-	fmt.Fprintf(this.ResponseWriter, content)
 	this.Length = len(content)
+	fmt.Fprintf(this.ResponseWriter, content)
 }
 
 //json格式的正常响应，{code: ,error:null, data: content}

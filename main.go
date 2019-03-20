@@ -1,6 +1,7 @@
 package ecgo
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -11,32 +12,32 @@ import (
 	//"log"
 )
 
-var container *Container
-
 // 框架的结构体对象及接口定义
 type (
 	// 应用全局对象
 	App struct {
-		Utime       int64
-		middlewares []Middleware
-	}
-	//单例容器
-	Container struct {
-		controllers map[string]Controller
-		services    map[string]Servicer
-		models      map[string]*Model
-	}
-	//service
-	Service struct {
+		Utime  int64
 		Config *util.IniConfig
 		Logger *util.Logger
-		*Request
 	}
-
+	// 全局对象容器
+	container struct {
+		controllers       map[string]IController // 所有的controller
+		services          map[string]IService    // 所有的service
+		middlewares       []IMiddleware          // 用到的中间件
+		controllerDepends map[string][]string    // controller依赖的service
+		middlewareDepends map[string][]string    // 中间件依赖的service
+		sevicesDepends    map[string]serviceNode //service所依赖的service和model
+	}
+	// 控制器对象
+	Controller struct {
+		*Context
+	}
 	// 单次会话上下文对象(应用于middleware\controller)
 	Context struct {
-		Config *util.IniConfig
-		Logger *util.Logger
+		*App
+		*Dao
+		Services map[string]Service
 		Response
 		*Request
 		Id    string
@@ -46,14 +47,13 @@ type (
 	// 请求参数对象
 	Request struct {
 		*http.Request
-		Length    int64               //请求大小
-		UpFile    map[string][]UpFile //存放上传的文件信息
-		QueryData map[string]string   //存放Get参数
-		PostData  map[string]string   //存放Post/put参数
-		Cookie    map[string]string   //存放cookie
-		Header    map[string]string   //存放header
-		Method    string              //请求的方法 GET/POST...
-		Path      string              //请求的Path
+		Length    int64             //请求大小
+		QueryData map[string]string //存放Get参数
+		PostData  map[string]string //存放Post/put参数
+		Cookie    map[string]string //存放cookie
+		Header    map[string]string //存放header
+		Method    string            //请求的方法 GET/POST...
+		Path      string            //请求的Path
 	}
 	// 响应对象
 	Response struct {
@@ -61,26 +61,8 @@ type (
 		Length int //响应大小
 		Code   int //响应码
 	}
-	//上传文件信息结构
-	UpFile struct {
-		Error int    //错误码，没有错误时为0
-		Name  string //上传原始的文件名
-		Size  int64  //文件大小
-		Type  string //文件content-type
-		Temp  string //上传后保存在服务器的临时文件路径
-	}
-	// Request reader
-	ReqReader interface {
-		Get(k ...string) (string, bool)
-		Gets(keys ...string) map[string]string
-		Post(k ...string) (string, bool)
-		Posts(keys ...string) map[string]string
-		GetCookie(key string) string
-		GetHeader(key string) string
-	}
-	// controller接口，确保传入的Context对象继承了框架的Context
-	Controller interface {
-		Execute(c, act string)
+	// controller接口，确保传入的Controller对象继承了框架的Controller
+	IController interface {
 		Store(k string, v interface{})
 		Load(k string) interface{}
 		Out(content string)
@@ -89,27 +71,34 @@ type (
 		NotFound()
 		SetHeader(k, v string)
 		SetCookie(c ...interface{})
-		ReqReader
+		//ReqRead
+		Get(k ...string) (string, bool)
+		Gets(keys ...string) map[string]string
+		Post(k ...string) (string, bool)
+		Posts(keys ...string) map[string]string
+		GetCookie(key string) string
+		GetHeader(key string) string
 	}
-	//中间件接口
-	Middleware interface {
-		Handler(next http.Handler) http.Handler
-	}
-	Servicer interface {
-		ReqReader
+	Dao struct {
+		DB  *sql.DB
+		tx  *sql.Tx
+		err error
+		//sql语句，执行时间
 	}
 )
 
-//框架对象
-func New(c ...Controller) *App {
-	Logger.Debug("App start")
-	container = &Container{}
-	container.addController(c...)
-	e := &App{Utime: time.Now().UnixNano()}
+var (
+	sBase = reflect.TypeOf((*IService)(nil)).Elem()
+	c     *container
+)
 
-	// 绑定中间件入口
-	e.Use(&entryMiddleware{})
-	return e
+//框架对象
+func New() *App {
+	Logger.Debug("App start")
+	c = newContainer()
+	app := &App{Utime: time.Now().UnixNano(), Config: Config, Logger: Logger}
+	app.Use(&entryMiddleware{})
+	return app
 }
 
 func newRequest(r *http.Request) (req *Request) {
@@ -118,44 +107,43 @@ func newRequest(r *http.Request) (req *Request) {
 	return
 }
 
+func newContainer() *container {
+	controllers := make(map[string]IController)    // 所有的controller
+	services := make(map[string]IService)          // 所有的service
+	middlewares := []IMiddleware{}                 // 用到的中间件
+	controllerDepends := make(map[string][]string) // controller依赖的service
+	middlewareDepends := make(map[string][]string) // 中间件依赖的service
+	sevicesDepends := make(map[string]serviceNode) // service所依赖的service和model
+	return &container{controllers, services, middlewares, controllerDepends, middlewareDepends, sevicesDepends}
+}
+
 // ---- ecgo 框架全局方法 ----
 
 //启动服务
 func (this *App) Run() {
 	this.Use(&routerMiddleware{})
-	ctx := reflect.ValueOf(&Context{Config: Config, Logger: Logger})
-	mux := http.Handler(nil)
-	for _, v := range this.middlewares {
-		elem := reflect.ValueOf(v).Elem()
-		elem.FieldByName("Context").Set(ctx)
-		//为middleware注入service
-		for i := 0; i < elem.NumField(); i++ {
-			serviceName := elem.Type().Field(i).Name
-			if service, ok := container.services[serviceName]; ok {
-				Logger.Debug("inject %s to %s", serviceName, elem.Type().Name())
-				s := reflect.ValueOf(service)
-				elem.FieldByName(serviceName).Set(s)
-			}
-		}
-		mux = v.Handler(mux)
-	}
-	port := Config.Get("port", ":8081")
-	Logger.Debug("listen %s", port)
+	//先绑定App到所有中间件
+
+	mux := &middlewareMux{App: this}
+	mux.Handler = http.Handler(nil)
+
+	port := this.Config.Get("port", ":8081")
 	http.Handle("/", mux)
 	if !strings.HasPrefix(port, ":") {
 		port = ":" + port
 	}
+	this.Logger.Debug("listen %s", port)
 	go http.ListenAndServe(port, nil)
 
 	//ssl
-	if sslOn := Config.Get("ssl.on", "false"); sslOn == "true" {
-		sslPort := Config.Get("ssl.port", ":443")
+	if sslOn := this.Config.Get("ssl.on", "false"); sslOn == "true" {
+		sslPort := this.Config.Get("ssl.port", ":443")
 		if !strings.HasPrefix(sslPort, ":") {
 			sslPort = ":" + sslPort
 		}
-		ca := Config.Get("ssl.ca", "")
-		caKey := Config.Get("ssl.ca_key", "")
-		Logger.Debug("ssl listen %s", sslPort)
+		ca := this.Config.Get("ssl.ca", "")
+		caKey := this.Config.Get("ssl.ca_key", "")
+		this.Logger.Debug("listen(ssl) %s", sslPort)
 		if err := http.ListenAndServeTLS(sslPort, ca, caKey, nil); err != nil {
 			panic(fmt.Sprintf("ssl error: %v", err))
 		}
@@ -164,17 +152,31 @@ func (this *App) Run() {
 	select {}
 }
 
-// 加载中间件(栈)
-func (this *App) Use(m Middleware) {
-	this.middlewares = append([]Middleware{m}, this.middlewares...)
-}
-
-// 添加service进容器
-func (this *App) AddService(s ...Servicer) {
-	container.addService(s...)
+// 添加中间件
+func (this *App) Use(middlewares ...IMiddleware) {
+	for _, m := range middlewares {
+		elem := reflect.ValueOf(m).Elem()
+		mName := elem.Type().Name()
+		mServices := []string{}
+		//获取所依赖的service
+		for i := 0; i < elem.NumField(); i++ {
+			field := elem.Type().Field(i)
+			fName := field.Name
+			if fName != "Middleware" && field.Type.Implements(sBase) {
+				if _, ok := c.services[fName]; ok {
+					mServices = append(mServices, fName)
+				} else {
+					panic(fmt.Sprintf("service %s not found", fName))
+				}
+			}
+		}
+		c.middlewares = append(c.middlewares, m)
+		c.middlewareDepends[mName] = mServices
+		this.Logger.Debug("Use middleware %s, depends: %v", mName, mServices)
+	}
 }
 
 // 设置自定义LogWriter
 func (this *App) SetLogWriter(kind string, w util.LogWriter) {
-	Logger.SetWriter(kind, w)
+	this.Logger.SetWriter(kind, w)
 }

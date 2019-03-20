@@ -4,55 +4,103 @@ import (
 	"reflect"
 )
 
-// 将controller加入容器中
-func (this *Container) addController(c ...Controller) {
-	this.controllers = make(map[string]Controller)
-	for _, v := range c {
-		this.controllers[reflect.TypeOf(v).Elem().Name()] = v
-	}
-}
-
 // 将service加入容器中
-func (this *Container) addService(s ...Servicer) {
-	this.services = make(map[string]Servicer)
-	service := reflect.ValueOf(&Service{Logger: Logger, Config: Config})
-	for _, v := range s {
-		reflect.ValueOf(v).Elem().FieldByName("Service").Set(service)
-		this.services[reflect.TypeOf(v).Elem().Name()] = v
+func (this *App) AddService(s ...IService) {
+	if len(s) < 1 {
+		panic("Service empty")
 	}
-
-	//再次扫描容器中所有services，为每个service绑定其它依赖
-	for _, v := range this.services {
+	this.Logger.Debug("AddService")
+	//遍历加入容器，同时记录每个service所依赖的service和model
+	for _, v := range s {
 		elem := reflect.ValueOf(v).Elem()
+		sName := elem.Type().Name()
+		dServices := []string{}
+		dModels := []string{}
 		for i := 0; i < elem.NumField(); i++ {
-			name := elem.Type().Field(i).Name
-			//model
-			if objType := elem.Type().Field(i).Type.String(); objType == "*ecgo.Model" {
-				//TODO: Table Name与Model Name的对应转换
-				Logger.Debug("inject model %s to %s", name, elem.Type().Name())
-				elem.FieldByName(name).Set(reflect.ValueOf(this.getModel(name)))
-			}
-			//其它service
-			if service, ok := container.services[name]; ok {
-				Logger.Debug("inject service %s to %s", name, elem.Type().Name())
-				elem.FieldByName(name).Set(reflect.ValueOf(service))
+			field := elem.Type().Field(i)
+			fName := field.Name
+			if _, ok := c.services[fName]; fName != "Service" && (ok || field.Type.Implements(sBase)) {
+				dServices = append(dServices, fName)
+			} else {
+				if objType := field.Type.String(); objType == "*ecgo.Model" {
+					dModels = append(dModels, fName)
+				}
 			}
 		}
+
+		c.services[sName] = v
+		c.sevicesDepends[sName] = serviceNode{dServices, dModels}
+		this.Logger.Debug(" > service %s depends: services=%v, models=%v", sName, dServices, dModels)
 	}
+	this.Logger.Debug("services: %v", c.services)
 }
 
-// 从容器中获取model对象，如果未有先创建
-func (this *Container) getModel(name string) *Model {
-	if nil == this.models {
-		this.models = make(map[string]*Model)
+// 将controller加入容器中
+func (this *App) AddController(controller ...IController) {
+	if c.services == nil {
+		panic("Call AddService before AddController pls")
 	}
-	model, exists := this.models[name]
-	if !exists {
-		model = newModel(name)
-		if err := model.LastError(); err != nil {
-			panic(err)
+	if len(controller) < 1 {
+		panic("Controller empty")
+	}
+	this.Logger.Debug("AddController")
+	for _, v := range controller {
+		elem := reflect.ValueOf(v).Elem()
+		cName := reflect.TypeOf(v).Elem().Name()
+
+		//记录每个controller依赖的service
+		cServices := []string{}
+		for i := 0; i < elem.NumField(); i++ {
+			field := elem.Type().Field(i)
+			fName := field.Name
+			if field.Type.Implements(sBase) {
+				if _, ok := c.services[fName]; ok {
+					cServices = append(cServices, fName)
+				} else {
+					//panic(fmt.Sprintf("service %s not found", fName))
+				}
+			}
 		}
-		this.models[name] = model
+		c.controllers[cName] = v
+		c.controllerDepends[cName] = cServices
+		this.Logger.Debug(" > controller %s depends: service=%v", cName, cServices)
 	}
-	return model
+	this.Logger.Debug("controllers: %v", c.controllers)
+}
+
+// 加载中间件
+func (this *App) LoadMiddleware() []IMiddleware {
+	tmpM := []IMiddleware{}
+	this.Logger.Debug("LoadMiddleware")
+	//TODO: 计算所有用到的中间件所依赖的service
+	middlewares := []string{}
+	rvM := reflect.ValueOf(&Middleware{&Context{App: this}})
+	for _, v := range c.middlewares {
+		tmpM = append([]IMiddleware{v}, tmpM...) //倒排
+		elem := reflect.ValueOf(v).Elem()
+		mName := elem.Type().Name()
+		elem.FieldByName("Middleware").Set(rvM)
+		middlewares = append(middlewares, mName)
+		this.Logger.Debug(" > middleware %s depends: services=%v", mName, c.middlewareDepends[mName])
+	}
+	this.Logger.Debug("middlewares: %v", middlewares)
+	return tmpM
+}
+
+//从容器中克隆
+func Clone(typ, name string) reflect.Value {
+	var src interface{}
+	var exists = false
+	switch typ {
+	case "controller":
+		src, exists = c.controllers[name]
+	case "service":
+		src, exists = c.services[name]
+	}
+	if exists {
+		tye := reflect.TypeOf(src).Elem()
+		return reflect.New(tye)
+	} else {
+		return reflect.Value{}
+	}
 }

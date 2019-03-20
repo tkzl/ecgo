@@ -34,7 +34,7 @@ func (this *Request) parse() {
 	// if multipart {
 	//
 	// }
-
+	this.Method = this.Request.Method
 	this.Path = this.URL.Path
 	return
 }

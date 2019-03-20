@@ -37,3 +37,21 @@ func Md5(in interface{}, length ...int) string {
 	}
 	return str[0:l]
 }
+
+//slice去重
+func SliceStrUniq(slc []string) []string {
+	result := []string{} // 存放结果
+	for _, v := range slc {
+		flag := true
+		for _, vv := range result {
+			if v == vv {
+				flag = false // 存在重复元素，标识为false
+				break
+			}
+		}
+		if flag {
+			result = append(result, v)
+		}
+	}
+	return result
+}
